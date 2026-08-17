@@ -47,6 +47,7 @@
 <header>
   <div class="inner">
     <a class="brand" href="/">Ldrbrd</a>
+    <a href="{% url 'top' %}">top</a>
     <span class="spacer"></span>
     {% if user.is_authenticated %}
       <span class="muted mono">{{ user.username }}</span>

@@ -10,7 +10,8 @@ document is public and needs no key.
 import secrets
 
 from django.conf import settings
-from django.db import models
+from django.db import IntegrityError, models
+from django.db.models import F
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -187,6 +188,77 @@ class App(models.Model):
             or self.course.owner_id == user.id
             or user.is_superuser
         )
+
+
+class AppUsage(models.Model):
+    """Running read/write tallies for an app, powering the /top leaderboard.
+
+    Counters rather than a per-request log: reads are public and unmetered, so
+    a row per hit would dwarf the data it describes.  Both counters move via
+    F() expressions so concurrent requests cannot lose an increment.
+    """
+
+    app = models.OneToOneField(App, on_delete=models.CASCADE, related_name="usage")
+    read_count = models.PositiveBigIntegerField(default=0)
+    write_count = models.PositiveBigIntegerField(default=0)
+    last_read_at = models.DateTimeField(null=True, blank=True)
+    last_write_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "app usage"
+        verbose_name_plural = "app usage"
+
+    def __str__(self) -> str:
+        return f"usage for {self.app}"
+
+    @property
+    def total_count(self) -> int:
+        return self.read_count + self.write_count
+
+    @property
+    def last_active_at(self):
+        stamps = [s for s in (self.last_read_at, self.last_write_at) if s]
+        return max(stamps) if stamps else None
+
+
+def record_usage(apps, *, kind: str) -> None:
+    """Bump the read or write tally for one app or an iterable of them.
+
+    Safe to call for an app that has never been touched: the UPDATE misses,
+    and the follow-up create fills the gap.  A concurrent create racing us is
+    caught and retried as an update.
+    """
+    if kind not in {"read", "write"}:
+        raise ValueError(f"unknown usage kind: {kind}")
+    if isinstance(apps, App):
+        apps = [apps]
+    app_ids = [a.pk if isinstance(a, App) else a for a in apps]
+    if not app_ids:
+        return
+
+    now = timezone.now()
+    count_field, stamp_field = f"{kind}_count", f"last_{kind}_at"
+
+    updated = AppUsage.objects.filter(app_id__in=app_ids).update(
+        **{count_field: F(count_field) + 1, stamp_field: now}
+    )
+    if updated == len(app_ids):
+        return
+
+    # At least one app has no usage row yet.
+    seen = set(
+        AppUsage.objects.filter(app_id__in=app_ids).values_list("app_id", flat=True)
+    )
+    for app_id in (i for i in app_ids if i not in seen):
+        try:
+            AppUsage.objects.create(
+                app_id=app_id, **{count_field: 1, stamp_field: now}
+            )
+        except IntegrityError:
+            # Another request created it between our SELECT and INSERT.
+            AppUsage.objects.filter(app_id=app_id).update(
+                **{count_field: F(count_field) + 1, stamp_field: now}
+            )
 
 
 class AppData(models.Model):

@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from courses.models import App, AppData, Course, Enrollment
+from courses.models import App, AppData, AppUsage, Course, Enrollment, record_usage
 
 User = get_user_model()
 
@@ -427,3 +427,280 @@ class PromotionTests(LdrbrdTestCase):
         self.instructor.refresh_from_db()
         self.assertTrue(self.admin.is_staff)
         self.assertFalse(self.instructor.is_staff)
+
+
+class UsageCountingTests(LdrbrdTestCase):
+    """Counters must move on the real endpoints, not just when poked directly."""
+
+    def setUp(self):
+        super().setUp()
+        self.app = self.make_app(approved=True)
+        self.path = "/prof/cs-101/score-pusher"
+        self.keyed = f"{self.path}?secret_key={self.app.secret_key}"
+
+    def usage(self):
+        self.app.refresh_from_db()
+        return AppUsage.objects.filter(app=self.app).first()
+
+    def test_public_read_increments_reads_only(self):
+        self.client.get(self.path)
+        usage = self.usage()
+        self.assertEqual(usage.read_count, 1)
+        self.assertEqual(usage.write_count, 0)
+        self.assertIsNotNone(usage.last_read_at)
+        self.assertIsNone(usage.last_write_at)
+
+    def test_repeated_reads_accumulate(self):
+        for _ in range(5):
+            self.client.get(self.path)
+        self.assertEqual(self.usage().read_count, 5)
+
+    def test_each_write_verb_counts_once(self):
+        self.client.put(self.keyed, data="{}", content_type="application/json")
+        self.client.post(self.keyed, data="{}", content_type="application/json")
+        self.client.patch(self.keyed, data="{}", content_type="application/json")
+        self.client.delete(self.keyed)
+        usage = self.usage()
+        self.assertEqual(usage.write_count, 4)
+        self.assertEqual(usage.read_count, 0)
+
+    def test_rejected_writes_are_not_counted(self):
+        pending = App.objects.create(
+            course=self.course, owner=self.student, name="Pending"
+        )
+        # Unapproved, and an anonymous write against the approved app.
+        self.client.put(
+            f"/prof/cs-101/pending?secret_key={pending.secret_key}",
+            data="{}",
+            content_type="application/json",
+        )
+        self.client.put(self.path, data="{}", content_type="application/json")
+        self.assertFalse(AppUsage.objects.filter(app=pending).exists())
+        self.assertIsNone(self.usage())
+
+    def test_course_wide_read_counts_for_every_app(self):
+        self.enrol(self.other)
+        second = App.objects.create(course=self.course, owner=self.other, name="Second")
+        self.client.get("/prof/cs-101")
+        self.assertEqual(self.usage().read_count, 1)
+        self.assertEqual(AppUsage.objects.get(app=second).read_count, 1)
+
+    def test_counters_survive_an_app_with_no_usage_row(self):
+        """record_usage has to cope with the very first hit."""
+        self.assertFalse(AppUsage.objects.filter(app=self.app).exists())
+        self.client.get(self.path)
+        self.assertEqual(self.usage().read_count, 1)
+
+    def test_record_usage_rejects_an_unknown_kind(self):
+        with self.assertRaises(ValueError):
+            record_usage(self.app, kind="sideways")
+
+    def test_record_usage_on_an_empty_list_is_a_no_op(self):
+        record_usage([], kind="read")
+        self.assertEqual(AppUsage.objects.count(), 0)
+
+
+class LeaderboardTests(LdrbrdTestCase):
+    def setUp(self):
+        super().setUp()
+        self.enrol(self.student)
+        self.enrol(self.other)
+        # Busy: 10 reads, 5 writes. Quiet: 2 reads. Idle: nothing.
+        self.busy = self.make_app(owner=self.student, name="Busy", approved=True)
+        self.quiet = self.make_app(owner=self.other, name="Quiet", approved=True)
+        self.idle = self.make_app(owner=self.student, name="Idle", approved=True)
+        AppUsage.objects.create(app=self.busy, read_count=10, write_count=5)
+        AppUsage.objects.create(app=self.quiet, read_count=2, write_count=0)
+
+        # A second course, to prove the filter actually narrows.
+        self.other_course = Course.objects.create(
+            owner=self.instructor, name="Art 200"
+        )
+        self.outsider = App.objects.create(
+            course=self.other_course, owner=self.student, name="Outsider"
+        )
+        AppUsage.objects.create(app=self.outsider, read_count=100, write_count=100)
+
+    def test_page_renders_and_ranks_by_total_activity(self):
+        response = self.client.get("/top")
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.context["entries"]]
+        self.assertEqual(names[0], "Outsider")   # 200
+        self.assertEqual(names[1], "Busy")       # 15
+        self.assertEqual(names[2], "Quiet")      # 2
+        self.assertEqual(names[3], "Idle")       # 0
+
+    def test_page_is_public(self):
+        self.client.logout()
+        self.assertEqual(self.client.get("/top").status_code, 200)
+
+    def test_never_used_apps_still_appear(self):
+        entries = self.client.get("/top").context["entries"]
+        idle = [e for e in entries if e["name"] == "Idle"][0]
+        self.assertEqual(idle["activity"], 0)
+        self.assertEqual(idle["bar_total"], 0)
+
+    def test_filter_by_course_reference(self):
+        response = self.client.get("/top", {"course": "prof/cs-101"})
+        names = {row["name"] for row in response.context["entries"]}
+        self.assertEqual(names, {"Busy", "Quiet", "Idle"})
+        self.assertNotIn("Outsider", names)
+
+    def test_filter_accepts_a_numeric_id(self):
+        response = self.client.get("/top", {"course": str(self.other_course.pk)})
+        names = [row["name"] for row in response.context["entries"]]
+        self.assertEqual(names, ["Outsider"])
+
+    def test_unknown_course_says_so_instead_of_showing_everything(self):
+        response = self.client.get("/top", {"course": "nobody/nothing"})
+        self.assertTrue(response.context["unknown_course"])
+        self.assertEqual(response.context["entries"], [])
+        self.assertContains(response, "No course matches")
+
+    def test_sort_by_reads_and_by_writes(self):
+        AppUsage.objects.filter(app=self.quiet).update(read_count=999, write_count=0)
+        by_reads = self.client.get(
+            "/top", {"course": "prof/cs-101", "sort": "reads"}
+        ).context["entries"]
+        self.assertEqual(by_reads[0]["name"], "Quiet")
+
+        by_writes = self.client.get(
+            "/top", {"course": "prof/cs-101", "sort": "writes"}
+        ).context["entries"]
+        self.assertEqual(by_writes[0]["name"], "Busy")
+
+    def test_bogus_sort_falls_back_to_the_default(self):
+        response = self.client.get("/top", {"sort": "sideways"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["sort"], "total")
+
+    def test_bars_scale_against_the_busiest_app(self):
+        entries = self.client.get(
+            "/top", {"course": "prof/cs-101"}
+        ).context["entries"]
+        busy = [e for e in entries if e["name"] == "Busy"][0]
+        quiet = [e for e in entries if e["name"] == "Quiet"][0]
+        self.assertAlmostEqual(busy["bar_total"], 100.0)
+        self.assertAlmostEqual(busy["bar_reads"], 10 / 15 * 100)
+        self.assertAlmostEqual(busy["bar_writes"], 5 / 15 * 100)
+        self.assertAlmostEqual(quiet["bar_total"], 2 / 15 * 100)
+
+    def test_totals_summarise_the_filtered_set(self):
+        totals = self.client.get(
+            "/top", {"course": "prof/cs-101"}
+        ).context["totals"]
+        self.assertEqual(totals["apps"], 3)
+        self.assertEqual(totals["reads"], 12)
+        self.assertEqual(totals["writes"], 5)
+        self.assertEqual(totals["activity"], 17)
+        self.assertEqual(totals["active_apps"], 2)
+
+    def test_course_dropdown_lists_only_courses_with_apps(self):
+        empty = Course.objects.create(owner=self.instructor, name="No Apps Here")
+        choices = list(self.client.get("/top").context["courses"])
+        self.assertIn(self.course, choices)
+        self.assertIn(self.other_course, choices)
+        self.assertNotIn(empty, choices)
+
+    def test_counted_reads_show_up_on_the_leaderboard(self):
+        """The full loop: hit the data endpoint, see it on /top."""
+        for _ in range(3):
+            self.client.get("/prof/art-200/outsider")
+        entries = self.client.get("/top", {"course": "prof/art-200"}).context["entries"]
+        self.assertEqual(entries[0]["reads"], 103)
+
+
+class LeaderboardApiTests(LdrbrdTestCase):
+    def setUp(self):
+        super().setUp()
+        self.enrol(self.student)
+        self.app = self.make_app(approved=True)
+        AppUsage.objects.create(app=self.app, read_count=7, write_count=3)
+
+    def test_json_endpoint_is_public(self):
+        self.client.logout()
+        response = self.client.get("/api/top")
+        self.assertEqual(response.status_code, 200)
+        row = response.json()[0]
+        self.assertEqual(row["rank"], 1)
+        self.assertEqual(row["reads"], 7)
+        self.assertEqual(row["writes"], 3)
+        self.assertEqual(row["activity"], 10)
+        self.assertEqual(row["course"], "prof/cs-101")
+
+    def test_json_never_leaks_the_secret_key(self):
+        body = self.client.get("/api/top").content.decode()
+        self.assertNotIn(self.app.secret_key, body)
+        self.assertNotIn("secret", body.lower())
+
+    def test_json_course_filter(self):
+        response = self.client.get("/api/top", {"course": "prof/cs-101"})
+        self.assertEqual(len(response.json()), 1)
+
+    def test_json_unknown_course_404s(self):
+        self.assertEqual(
+            self.client.get("/api/top", {"course": "nobody/nothing"}).status_code, 404
+        )
+
+    def test_json_bad_sort_400s(self):
+        self.assertEqual(
+            self.client.get("/api/top", {"sort": "sideways"}).status_code, 400
+        )
+
+
+class LeaderboardBarTests(LdrbrdTestCase):
+    """A ranked bar chart is read as monotonic, so bars must track the sort."""
+
+    def setUp(self):
+        super().setUp()
+        self.enrol(self.student)
+        # Heavy reader vs heavy writer, so total and per-measure order differ.
+        self.reader = self.make_app(owner=self.student, name="Reader", approved=True)
+        self.writer = self.make_app(owner=self.student, name="Writer", approved=True)
+        AppUsage.objects.create(app=self.reader, read_count=1000, write_count=10)
+        AppUsage.objects.create(app=self.writer, read_count=10, write_count=100)
+
+    def bars(self, sort):
+        entries = self.client.get("/top", {"sort": sort}).context["entries"]
+        return {e["name"]: e for e in entries}, entries
+
+    def test_bars_are_monotonic_when_sorting_by_writes(self):
+        by_name, entries = self.bars("writes")
+        self.assertEqual(entries[0]["name"], "Writer")
+        # The leader fills the track and nobody below it is wider.
+        self.assertAlmostEqual(entries[0]["bar_total"], 100.0)
+        widths = [e["bar_total"] for e in entries]
+        self.assertEqual(widths, sorted(widths, reverse=True))
+        # Sorting by writes paints the writes series only.
+        self.assertEqual(by_name["Writer"]["bar_reads"], 0)
+        self.assertAlmostEqual(by_name["Writer"]["bar_writes"], 100.0)
+
+    def test_bars_are_monotonic_when_sorting_by_reads(self):
+        by_name, entries = self.bars("reads")
+        self.assertEqual(entries[0]["name"], "Reader")
+        widths = [e["bar_total"] for e in entries]
+        self.assertEqual(widths, sorted(widths, reverse=True))
+        self.assertEqual(by_name["Reader"]["bar_writes"], 0)
+        self.assertAlmostEqual(by_name["Reader"]["bar_reads"], 100.0)
+
+    def test_total_sort_keeps_the_reads_plus_writes_stack(self):
+        by_name, entries = self.bars("total")
+        reader = by_name["Reader"]
+        self.assertAlmostEqual(reader["bar_reads"], 1000 / 1010 * 100)
+        self.assertAlmostEqual(reader["bar_writes"], 10 / 1010 * 100)
+        self.assertAlmostEqual(reader["bar_total"], 100.0)
+
+    def test_legend_names_only_the_series_on_screen(self):
+        writes_page = self.client.get("/top", {"sort": "writes"})
+        self.assertContains(writes_page, "bars show writes")
+        self.assertEqual(writes_page.context["bar_measure"], "writes")
+
+        total_page = self.client.get("/top", {"sort": "total"})
+        self.assertContains(total_page, "bars show reads + writes")
+        self.assertEqual(total_page.context["bar_measure"], "activity")
+
+    def test_an_app_with_no_writes_draws_no_bar_under_the_writes_sort(self):
+        AppUsage.objects.filter(app=self.reader).update(write_count=0)
+        by_name, _ = self.bars("writes")
+        self.assertEqual(by_name["Reader"]["bar_value"], 0)
+        self.assertEqual(by_name["Reader"]["bar_total"], 0)

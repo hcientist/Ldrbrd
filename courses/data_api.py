@@ -18,7 +18,7 @@ from ninja import NinjaAPI, Schema
 from ninja.errors import HttpError
 from ninja.security import APIKeyQuery
 
-from courses.models import App, AppData, Course
+from courses.models import App, AppData, Course, record_usage
 
 SECRET_KEY_PARAM = "secret_key"
 
@@ -140,6 +140,7 @@ def register(api: NinjaAPI) -> None:
     def read_data(request, instructor: str, course: str, app: str):
         target = locate_app(instructor, course, app)
         record = AppData.objects.filter(app=target).first()
+        record_usage(target, kind="read")
         return data_response(target, record)
 
     def do_replace(request, instructor: str, course: str, app: str) -> dict:
@@ -148,6 +149,7 @@ def register(api: NinjaAPI) -> None:
         record, _ = AppData.objects.update_or_create(
             app=target, defaults={"payload": payload}
         )
+        record_usage(target, kind="write")
         return write_response(target, record)
 
     @api.put(
@@ -194,6 +196,7 @@ def register(api: NinjaAPI) -> None:
         merged.update(payload)
         record.payload = merged
         record.save(update_fields=["payload", "updated_at"])
+        record_usage(target, kind="write")
         return write_response(target, record)
 
     @api.delete(
@@ -206,6 +209,7 @@ def register(api: NinjaAPI) -> None:
     def clear_data(request, instructor: str, course: str, app: str):
         target = authorised_app(request, instructor, course, app)
         record, _ = AppData.objects.update_or_create(app=target, defaults={"payload": {}})
+        record_usage(target, kind="write")
         return write_response(target, record)
 
     @api.get(
@@ -224,4 +228,6 @@ def register(api: NinjaAPI) -> None:
             record.app_id: record
             for record in AppData.objects.filter(app__in=apps)
         }
+        # A course-wide read counts as one read for every app it returned.
+        record_usage(list(apps), kind="read")
         return [data_response(a, records.get(a.pk)) for a in apps]

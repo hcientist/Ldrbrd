@@ -50,6 +50,7 @@ urlpatterns = [
         name="canvas-openid-configuration",
     ),
     path("join/<str:join_token>", account_views.join_course, name="join-course"),
+    path("top", account_views.top, name="top"),
     path("", account_views.home, name="home"),
     # Keep last: matches /<instructor>/<course>[/<appname>].
     path("", data.urls),

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils import timezone
 
-from courses.models import App, AppData, Course, Enrollment
+from courses.models import App, AppData, AppUsage, Course, Enrollment
 
 
 class EnrollmentInline(admin.TabularInline):
@@ -75,6 +75,17 @@ class EnrollmentAdmin(admin.ModelAdmin):
     list_filter = ("course", "joined_at")
     search_fields = ("user__username", "course__name")
     autocomplete_fields = ("user", "course")
+
+
+@admin.register(AppUsage)
+class AppUsageAdmin(admin.ModelAdmin):
+    list_display = ("app", "read_count", "write_count", "last_read_at", "last_write_at")
+    search_fields = ("app__name", "app__slug", "app__course__name")
+    readonly_fields = ("read_count", "write_count", "last_read_at", "last_write_at")
+    autocomplete_fields = ("app",)
+
+    def has_add_permission(self, request) -> bool:
+        return False
 
 
 @admin.register(AppData)

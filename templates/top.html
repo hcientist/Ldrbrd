@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Top apps &middot; Ldrbrd{% endblock %}
+
+{% block content %}
+<style>
+  /* Two-series categorical palette, validated for both modes against the
+     page surfaces (worst adjacent CVD dE 24.7 light / 26.8 dark; normal
+     vision 33.6 / 31.8; both series clear 3:1 on their surface). */
+  .lb {
+    --series-reads:  #2a78d6;
+    --series-writes: #eb6834;
+    --track: #ecebe7;
+  }
+  @media (prefers-color-scheme: dark) {
+    .lb {
+      --series-reads:  #3987e5;
+      --series-writes: #d95926;
+      --track: #23262e;
+    }
+  }
+
+  .kpis { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+          margin: 1.25rem 0 2rem; }
+  .kpi { border: 1px solid var(--line); border-radius: 8px; padding: .8rem .9rem; }
+  .kpi .n { font-size: 1.75rem; font-weight: 650; letter-spacing: -.03em;
+            font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .kpi .k { font-size: .72rem; text-transform: uppercase; letter-spacing: .07em;
+            color: var(--muted); margin-top: .2rem; }
+
+  .filters { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center;
+             margin-bottom: 1.25rem; }
+  .filters select { font: inherit; font-size: .9rem; padding: .4rem .5rem;
+                    border: 1px solid var(--line); border-radius: 6px;
+                    background: var(--bg); color: var(--fg); }
+  .filters label { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--muted); }
+
+  .legend { display: flex; gap: 1rem; align-items: center; margin: 0 0 .75rem;
+            font-size: .82rem; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .sw-r { background: var(--series-reads); }
+  .sw-w { background: var(--series-writes); }
+
+  table.lbt { width: 100%; border-collapse: collapse; }
+  table.lbt th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+                 color: var(--muted); font-weight: 600; text-align: left;
+                 padding: .4rem .6rem; border-bottom: 1px solid var(--line); }
+  table.lbt td { padding: .55rem .6rem; border-bottom: 1px solid var(--line);
+                 vertical-align: middle; font-size: .92rem; }
+  table.lbt tr:hover td { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+  .rank { color: var(--muted); font-variant-numeric: tabular-nums; width: 2.5rem;
+          text-align: right; }
+  .lead .rank { color: var(--fg); font-weight: 700; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; width: 4.5rem; }
+  .tot { text-align: right; font-variant-numeric: tabular-nums; font-weight: 650;
+         width: 5rem; }
+  .appname { font-weight: 600; }
+  .sub { color: var(--muted); font-size: .8rem; }
+  .appcell { min-width: 13rem; }
+  .when { white-space: nowrap; width: 1%; }
+
+  /* Bars: reads + writes stacked to total activity, each row scaled against
+     the busiest app. 2px gap keeps the two fills from reading as one. */
+  .barcell { width: 30%; min-width: 8rem; }
+  .track { background: var(--track); border-radius: 4px; height: 12px;
+           display: flex; gap: 2px; overflow: hidden; }
+  .seg { height: 100%; border-radius: 4px; min-width: 2px; }
+  .seg-r { background: var(--series-reads); }
+  .seg-w { background: var(--series-writes); }
+  .idle { color: var(--muted); font-size: .78rem; font-style: italic; }
+  .note { color: var(--muted); font-size: .85rem; margin-top: 1.5rem; }
+</style>
+
+<div class="lb">
+  <h1>Top apps</h1>
+  <p class="muted">
+    {% if course %}Usage across <strong>{{ course.name }}</strong>
+      ({{ course.owner.username }}).
+    {% else %}Usage across every registered app.{% endif %}
+    Reads and writes are counted on the public data endpoints.
+  </p>
+
+  <form class="filters" method="get" action="{% url 'top' %}">
+    <label for="course">Course</label>
+    <select name="course" id="course" onchange="this.form.submit()">
+      <option value="">All courses</option>
+      {% for c in courses %}
+        <option value="{{ c.owner.username }}/{{ c.slug }}"
+          {% if course and c.pk == course.pk %}selected{% endif %}>
+          {{ c.name }} &mdash; {{ c.owner.username }}
+        </option>
+      {% endfor %}
+    </select>
+
+    <label for="sort">Rank by</label>
+    <select name="sort" id="sort" onchange="this.form.submit()">
+      {% for value, label in sorts %}
+        <option value="{{ value }}" {% if sort == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <noscript><button class="btn" type="submit">Apply</button></noscript>
+    {% if course or sort != 'total' %}
+      <a href="{% url 'top' %}" class="sub">reset</a>
+    {% endif %}
+  </form>
+
+  {% if unknown_course %}
+    <p class="empty">No course matches &ldquo;{{ course_ref }}&rdquo;.</p>
+  {% elif not entries %}
+    <p class="empty">No apps registered yet.</p>
+  {% else %}
+    <div class="kpis">
+      <div class="kpi"><div class="n">{{ totals.activity }}</div><div class="k">Total events</div></div>
+      <div class="kpi"><div class="n">{{ totals.reads }}</div><div class="k">Reads</div></div>
+      <div class="kpi"><div class="n">{{ totals.writes }}</div><div class="k">Writes</div></div>
+      <div class="kpi"><div class="n">{{ totals.active_apps }}/{{ totals.apps }}</div><div class="k">Apps used</div></div>
+    </div>
+
+    <div class="legend">
+      {% if bar_measure == 'activity' %}
+        <span><i class="swatch sw-r"></i> Reads</span>
+        <span><i class="swatch sw-w"></i> Writes</span>
+        <span class="sub">bars show reads + writes, scaled to the busiest app</span>
+      {% elif bar_measure == 'reads' %}
+        <span><i class="swatch sw-r"></i> Reads</span>
+        <span class="sub">bars show reads, scaled to the most-read app</span>
+      {% else %}
+        <span><i class="swatch sw-w"></i> Writes</span>
+        <span class="sub">bars show writes, scaled to the most-written app</span>
+      {% endif %}
+    </div>
+
+    <div class="wrap">
+    <table class="lbt">
+      <thead>
+        <tr>
+          <th class="rank">#</th>
+          <th>App</th>
+          <th class="barcell">Activity</th>
+          <th class="num">Reads</th>
+          <th class="num">Writes</th>
+          <th class="tot">Total</th>
+          <th class="when">Last used</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in entries %}
+          <tr {% if forloop.first and row.activity %}class="lead"{% endif %}>
+            <td class="rank">{{ row.rank }}</td>
+            <td class="appcell">
+              <span class="appname">{{ row.name }}</span>
+              {% if not row.approved %}<span class="pill wait">pending</span>{% endif %}
+              <div class="sub">{{ row.course_name }} &middot; {{ row.owner }}</div>
+            </td>
+            <td class="barcell">
+              {% if row.bar_value %}
+                <div class="track"
+                     title="{{ row.name }} — {{ row.reads }} reads, {{ row.writes }} writes, {{ row.activity }} total">
+                  {% if row.bar_reads %}
+                    <span class="seg seg-r" style="width: {{ row.bar_reads|floatformat:3 }}%"></span>
+                  {% endif %}
+                  {% if row.bar_writes %}
+                    <span class="seg seg-w" style="width: {{ row.bar_writes|floatformat:3 }}%"></span>
+                  {% endif %}
+                </div>
+              {% elif row.activity %}
+                <span class="idle">no {{ bar_measure }} yet</span>
+              {% else %}
+                <span class="idle">no traffic yet</span>
+              {% endif %}
+            </td>
+            <td class="num">{{ row.reads }}</td>
+            <td class="num">{{ row.writes }}</td>
+            <td class="tot">{{ row.activity }}</td>
+            <td class="sub when"
+                {% if row.last_active_at %}title="{{ row.last_active_at|date:"j M Y, H:i e" }}"{% endif %}>
+              {% if row.last_active_at %}{{ row.last_active_at|date:"j M, H:i" }}
+              {% else %}&mdash;{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+
+    <p class="note">
+      Same data as JSON: <code>GET /api/top{% if course %}?course={{ course.owner.username }}/{{ course.slug }}{% endif %}</code>
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

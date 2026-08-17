@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.cache import cache_control
 
+from courses import leaderboard as lb
 from courses.models import Course, Enrollment
 
 
@@ -57,6 +58,45 @@ def home(request):
         )
         context["apps"] = request.user.apps.select_related("course", "course__owner")
     return render(request, "home.html", context)
+
+
+def top(request):
+    """Usage leaderboard for every registered app.
+
+    Public, like the data it summarises.  ``?course=`` narrows to one course
+    and ``?sort=`` picks the ranking; both round-trip through the querystring
+    so a filtered view is a shareable link.
+    """
+    course_ref = request.GET.get("course", "")
+    sort = request.GET.get("sort", lb.DEFAULT_SORT)
+    if sort not in lb.SORTS:
+        sort = lb.DEFAULT_SORT
+
+    course = lb.resolve_course(course_ref)
+    # A ?course= that matched nothing should say so, not silently show everything.
+    unknown_course = bool(course_ref.strip()) and course is None
+
+    entries = [] if unknown_course else lb.rows(course, sort)
+    return render(
+        request,
+        "top.html",
+        {
+            "entries": entries,
+            "totals": lb.totals(entries),
+            "courses": lb.course_choices(),
+            "course": course,
+            "course_ref": course_ref,
+            "unknown_course": unknown_course,
+            "sort": sort,
+            "bar_measure": lb.BAR_MEASURE.get(sort, "activity"),
+            "sorts": [
+                ("total", "Most activity"),
+                ("reads", "Most reads"),
+                ("writes", "Most writes"),
+                ("recent", "Most recent"),
+            ],
+        },
+    )
 
 
 @login_required

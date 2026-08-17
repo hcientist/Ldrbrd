@@ -119,6 +119,43 @@ Any JSON value is accepted — object, array, string, number, `true`/`false`, or
 **All stored data is world readable.** That is the intended design; there is
 deliberately no UI to change it.
 
+## Usage leaderboard
+
+`/top` ranks every registered app by how much traffic it is getting. It is
+public, like the data it summarises, and the filter round-trips through the
+querystring so a narrowed view is a shareable link.
+
+```
+/top                                    every app, most activity first
+/top?course=prof/cs-101                 one course
+/top?course=12&sort=writes              by id, ranked by writes
+```
+
+`sort` is one of `total` (default), `reads`, `writes`, `recent`. Because a
+ranked bar chart is read as monotonic, the bar encodes whatever the ranking
+encodes: `total` draws the reads+writes stack, `reads`/`writes` draw that one
+series, and `recent` keeps the stack since recency is not a magnitude.
+
+Apps that have never been touched still appear, at the bottom, with zeroes —
+"registered but unused" is a fact worth showing.
+
+The same data as JSON:
+
+```bash
+curl https://ldrbrd.example.edu/api/top
+curl "https://ldrbrd.example.edu/api/top?course=prof/cs-101&sort=reads"
+```
+
+Counting happens on the public data endpoints: a `GET` of one app is one read,
+a course-wide `GET` is one read for each app it returned, and each accepted
+`PUT`/`POST`/`PATCH`/`DELETE` is one write. Rejected requests — bad key,
+unapproved app — are not counted. Tallies live in `courses.AppUsage` and move
+through `F()` expressions, so concurrent requests cannot lose an increment.
+
+Two consequences worth knowing: every public read costs one small `UPDATE`
+(fine at classroom scale, but it is a write on the read path), and the counters
+are cumulative totals, not a time series — there is no per-day history to chart.
+
 ## The management API
 
 Session-authenticated — sign in through Canvas first. Because ninja's
@@ -126,6 +163,7 @@ Session-authenticated — sign in through Canvas first. Because ninja's
 
 | method   | path                                | who                      |
 | -------- | ----------------------------------- | ------------------------ |
+| `GET`    | `/api/top`                          | **public** (no auth)     |
 | `GET`    | `/api/me`                           | any signed-in user       |
 | `GET`    | `/api/courses`                      | courses you teach or joined |
 | `POST`   | `/api/courses`                      | staff only               |
@@ -162,7 +200,7 @@ permissions, but the login page will accept them.
 ./.venv/bin/python manage.py test
 ```
 
-54 tests cover the Canvas OIDC wiring and the fork-specific settings, the
+84 tests cover the Canvas OIDC wiring and the fork-specific settings, the
 Canvas-to-Django user mapping, the promotion flow, per-role visibility of join
-links and secret keys, approval gating, and the data plane's round trips and
-rejections.
+links and secret keys, approval gating, the data plane's round trips and
+rejections, and the leaderboard's counting, filtering and bar scaling.

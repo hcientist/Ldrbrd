@@ -18,6 +18,7 @@ from ninja import Router, Schema
 from ninja.errors import HttpError
 from ninja.security import django_auth
 
+from courses import leaderboard
 from courses.models import App, Course, Enrollment, unique_slug
 
 router = Router(auth=django_auth)
@@ -75,6 +76,21 @@ class JoinIn(Schema):
 class AppIn(Schema):
     name: str
     slug: str | None = None
+
+
+class LeaderboardRow(Schema):
+    rank: int
+    name: str
+    slug: str
+    owner: str
+    course: str
+    instructor: str
+    approved: bool
+    data_url: str
+    reads: int
+    writes: int
+    activity: int
+    last_active_at: datetime | None = None
 
 
 class AppOut(Schema):
@@ -179,6 +195,50 @@ def get_administered_app(request, app_id: int) -> App:
 @router.get("/me", response=UserOut)
 def me(request):
     return request.user
+
+
+# --------------------------------------------------------------------------
+# Leaderboard -- the JSON twin of the /top page
+# --------------------------------------------------------------------------
+
+
+@router.get(
+    "/top",
+    auth=None,
+    response=list[LeaderboardRow],
+    summary="App usage leaderboard (public)",
+)
+def top(request, course: str | None = None, sort: str = leaderboard.DEFAULT_SORT):
+    """Usage stats for every registered app, ranked.
+
+    Public, like the data it summarises.  ``course`` takes the same
+    ``instructor/slug`` reference the data plane uses; ``sort`` is one of
+    total, reads, writes or recent.
+    """
+    if sort not in leaderboard.SORTS:
+        raise HttpError(
+            400, f"sort must be one of: {', '.join(sorted(leaderboard.SORTS))}"
+        )
+    found = leaderboard.resolve_course(course)
+    if course and found is None:
+        raise HttpError(404, f"No course matches '{course}'.")
+    return [
+        {
+            "rank": row["rank"],
+            "name": row["name"],
+            "slug": row["slug"],
+            "owner": row["owner"],
+            "course": row["course_ref"],
+            "instructor": row["instructor"],
+            "approved": row["approved"],
+            "data_url": row["data_url"],
+            "reads": row["reads"],
+            "writes": row["writes"],
+            "activity": row["activity"],
+            "last_active_at": row["last_active_at"],
+        }
+        for row in leaderboard.rows(found, sort)
+    ]
 
 
 # --------------------------------------------------------------------------
