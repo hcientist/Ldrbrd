@@ -1,0 +1,52 @@
+# Ldrbrd runs as a single container against a SQLite file on a named volume.
+# There is no database service to start: the app is one Django process, and at
+# classroom scale SQLite in WAL mode handles it.
+#
+# Nginx Proxy Manager routes to this stack over the shared `web` network.
+# Create it once if it doesn't exist:  docker network create web
+#
+# Then in the NPM UI add a Proxy Host:
+#   Domain:           ldrbrd.example.edu
+#   Forward Hostname: ldrbrd
+#   Forward Port:     8000
+#   Websockets: off   Block common exploits: on   SSL: request a certificate
+#
+# Set LDRBRD_BASE_URL in .env to that public URL -- join links, data URLs and
+# the Canvas redirect URI are all built from it.
+
+networks:
+  web:
+    external: true
+
+volumes:
+  ldrbrd_data:
+
+services:
+  ldrbrd:
+    build: .
+    image: ldrbrd:latest
+    container_name: ldrbrd
+    restart: unless-stopped
+    env_file:
+      # Overridable so a throwaway env file can be used for smoke tests
+      # instead of your real .env.
+      - ${ENV_FILE:-.env}
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_DB_PATH: /data/db.sqlite3
+      # Canvas publishes no discovery document, so Ldrbrd serves its own and
+      # the OIDC adapter fetches it over loopback. LDRBRD_BASE_URL is the
+      # public hostname, which this container generally cannot resolve back to
+      # itself -- so the fetch has to go to its own port instead.
+      CANVAS_OIDC_DISCOVERY_URL: >-
+        http://127.0.0.1:8000/.well-known/canvas-openid-configuration
+      # Only the proxy can reach this container, so its forwarding headers are
+      # the ones we trust for the https scheme.
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - ldrbrd_data:/data
+    networks:
+      - web
+    # Uncomment to reach it directly without a proxy in front:
+    # ports:
+    #   - "8000:8000"

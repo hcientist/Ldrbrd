@@ -75,6 +75,26 @@ MIDDLEWARE = [
     "allauth.account.middleware.AccountMiddleware",
 ]
 
+# WhiteNoise ships in requirements-docker.txt, not requirements.txt: the dev
+# server serves static files itself, but a DEBUG=false container needs someone
+# to hand out the admin's CSS.  Wire it up only when it is actually installed
+# so a bare local venv still boots.
+try:
+    import whitenoise  # noqa: F401
+except ImportError:
+    WHITENOISE_ENABLED = False
+else:
+    WHITENOISE_ENABLED = True
+    MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+
 ROOT_URLCONF = "ldrbrd.urls"
 
 TEMPLATES = [
@@ -100,6 +120,15 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": env("DJANGO_DB_PATH", BASE_DIR / "db.sqlite3"),
+        "OPTIONS": {
+            # Every public read bumps a usage counter for /top, so reads land on
+            # the write path.  WAL lets readers and one writer coexist, and the
+            # busy timeout stops concurrent gunicorn workers from failing fast
+            # on a lock instead of waiting their turn.
+            "timeout": int(env("DJANGO_DB_TIMEOUT", 20)),
+            "init_command": "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+            "transaction_mode": "IMMEDIATE",
+        },
     }
 }
 

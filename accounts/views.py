@@ -2,10 +2,11 @@
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.db import connection
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.views.decorators.cache import cache_control
+from django.views.decorators.cache import cache_control, never_cache
 
 from courses import leaderboard as lb
 from courses.models import Course, Enrollment
@@ -40,6 +41,23 @@ def canvas_openid_configuration(request):
     }
     config.update(settings.CANVAS_OPENID_CONFIG_OVERRIDES)
     return JsonResponse(config)
+
+
+@never_cache
+def healthz(request):
+    """Liveness probe for the container healthcheck.
+
+    Touches the database, because a Ldrbrd that cannot reach its SQLite file
+    is not healthy in any useful sense -- an HTTP 200 from a process that
+    cannot serve a request would just paper over the failure.
+    """
+    try:
+        connection.ensure_connection()
+    except Exception:  # noqa: BLE001 - any DB failure is unhealthy
+        return JsonResponse(
+            {"status": "error", "database": "unavailable"}, status=503
+        )
+    return JsonResponse({"status": "ok"})
 
 
 def canvas_login_url() -> str:

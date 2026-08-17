@@ -7,6 +7,7 @@ on Canvas's non-standard userinfo shape.
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.contrib.auth import get_user_model
+from django.db.utils import OperationalError
 from django.test import TestCase
 
 from accounts.adapters import CanvasSocialAccountAdapter, split_name
@@ -120,3 +121,31 @@ class SignupPolicyTests(TestCase):
         )
         self.assertFalse(user.is_staff)
         self.assertFalse(user.is_superuser)
+
+
+class HealthzTests(TestCase):
+    """Backs the container HEALTHCHECK, which greps the body for status ok."""
+
+    def test_healthz_is_public_and_reports_ok(self):
+        response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_body_matches_what_the_dockerfile_greps_for(self):
+        # Dockerfile: curl -fsS .../healthz | grep -q '"status": "ok"'
+        self.assertIn(b'"status": "ok"', self.client.get("/healthz").content)
+
+    def test_healthz_is_never_cached(self):
+        response = self.client.get("/healthz")
+        self.assertIn("no-cache", response.headers.get("Cache-Control", ""))
+
+    def test_healthz_reports_503_when_the_database_is_unreachable(self):
+        from unittest.mock import patch
+
+        with patch(
+            "accounts.views.connection.ensure_connection",
+            side_effect=OperationalError("no such table"),
+        ):
+            response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["status"], "error")

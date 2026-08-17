@@ -86,6 +86,48 @@ Put the key's id and secret in `.env` as `CANVAS_CLIENT_ID` /
 
 Interactive API docs live at `/api/docs` (management) and `/docs` (data).
 
+## Running with Docker
+
+One container, one SQLite file on a named volume. There is no database
+service: the app is a single Django process, and at classroom scale SQLite in
+WAL mode handles it.
+
+```bash
+docker network create web          # once, shared with the reverse proxy
+cp .env.example .env               # fill in Canvas credentials + LDRBRD_BASE_URL
+docker compose up -d --build
+docker compose logs -f ldrbrd
+```
+
+Set `DJANGO_SUPERUSER_USERNAME` / `_PASSWORD` / `_EMAIL` in `.env` for the
+first boot and the entrypoint creates that account, then leaves it alone on
+every restart. Without a superuser nobody can promote an instructor to staff,
+so no course can ever be created.
+
+A few things the compose file handles that are easy to get wrong:
+
+- **`CANVAS_OIDC_DISCOVERY_URL` points at the container's own loopback.** The
+  OIDC adapter fetches the discovery shim over HTTP, and `LDRBRD_BASE_URL` is
+  the public hostname — which the container usually cannot resolve back to
+  itself. Compose overrides it to `http://127.0.0.1:8000/...`.
+- **The volume is `/data`, owned by uid 10001 at build time**, so the
+  unprivileged user can write the database. If you swap in a host bind mount,
+  `chown` it to 10001 yourself.
+- **`collectstatic` runs at build time** and WhiteNoise serves the result, so
+  the admin has its CSS with `DEBUG=false`. WhiteNoise lives in
+  `requirements-docker.txt`; `settings.py` wires it up only when importable, so
+  a local venv without it still boots.
+- **Two gunicorn workers, four threads each.** SQLite serialises writers, so
+  more processes would just mean more lock contention; threads carry the
+  concurrency instead, since the work is I/O bound.
+
+The healthcheck hits `/healthz`, which touches the database — a process that
+cannot reach its own SQLite file is not healthy in any useful sense.
+
+Behind Nginx Proxy Manager, point a Proxy Host at hostname `ldrbrd`, port
+`8000`, and set `LDRBRD_BASE_URL` to the public URL. To run without a proxy,
+uncomment the `ports:` block in `docker-compose.yml`.
+
 ## The data plane
 
 Writes need the app's `secret_key` in the querystring and only work once the
@@ -200,7 +242,8 @@ permissions, but the login page will accept them.
 ./.venv/bin/python manage.py test
 ```
 
-84 tests cover the Canvas OIDC wiring and the fork-specific settings, the
+88 tests cover the Canvas OIDC wiring and the fork-specific settings, the
 Canvas-to-Django user mapping, the promotion flow, per-role visibility of join
 links and secret keys, approval gating, the data plane's round trips and
-rejections, and the leaderboard's counting, filtering and bar scaling.
+rejections, the leaderboard's counting, filtering and bar scaling, and the
+container healthcheck contract.

@@ -1,0 +1,6 @@
+-r requirements.txt
+
+gunicorn>=21.2
+# Serves the admin's static files when DEBUG is off; settings.py wires it up
+# only if it is importable, so a bare local venv does not need it.
+whitenoise>=6.6
