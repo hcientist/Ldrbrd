@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Join {{ course.name }} &middot; Ldrbrd{% endblock %}
+
+{% block content %}
+<h1>{{ course.name }}</h1>
+<p class="muted">Taught by {{ course.owner.get_full_name|default:course.owner.username }}</p>
+
+{% if course.description %}<p>{{ course.description }}</p>{% endif %}
+
+{% if enrolled %}
+  <p><span class="pill ok">You're already in this course.</span></p>
+  <p><a class="btn" href="/">Back to your dashboard</a></p>
+{% elif closed %}
+  <p><span class="pill wait">This course is no longer accepting new students.</span></p>
+  <p><a href="/">Back to your dashboard</a></p>
+{% else %}
+  <form method="post">
+    {% csrf_token %}
+    <button class="btn" type="submit">Join this course</button>
+  </form>
+{% endif %}
+{% endblock %}

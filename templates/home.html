@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% if not user.is_authenticated %}
+  <h1>Ldrbrd</h1>
+  <p class="muted">Sign in with your Canvas account to register apps and publish
+  their data.</p>
+  <p><a class="btn" href="{{ canvas_login_url }}">Sign in with Canvas</a></p>
+{% else %}
+  <h1>Hello, {{ user.get_full_name|default:user.username }}</h1>
+  <p class="muted">
+    {% if user.is_superuser %}Superuser &middot; {% endif %}
+    {% if user.is_staff %}Staff &mdash; you can create courses.{% else %}
+    Student account. Ask your instructor for a course link to get started.{% endif %}
+  </p>
+
+  {% if taught_courses %}
+    <h2>Courses you teach</h2>
+    <div class="wrap"><table>
+      <tr><th>Course</th><th>Join link (share with students)</th><th>Apps</th></tr>
+      {% for course in taught_courses %}
+        <tr>
+          <td><strong>{{ course.name }}</strong><br>
+              <span class="muted mono">{{ course.data_url }}</span></td>
+          <td class="mono">{{ course.join_url }}</td>
+          <td>{{ course.apps.count }}</td>
+        </tr>
+      {% endfor %}
+    </table></div>
+  {% endif %}
+
+  {% if enrolled_courses %}
+    <h2>Courses you've joined</h2>
+    <div class="wrap"><table>
+      <tr><th>Course</th><th>Instructor</th></tr>
+      {% for course in enrolled_courses %}
+        <tr><td>{{ course.name }}</td><td class="mono">{{ course.owner.username }}</td></tr>
+      {% endfor %}
+    </table></div>
+  {% endif %}
+
+  <h2>Your apps</h2>
+  {% if apps %}
+    <div class="wrap"><table>
+      <tr><th>App</th><th>Course</th><th>Status</th><th>Endpoint</th></tr>
+      {% for app in apps %}
+        <tr>
+          <td><strong>{{ app.name }}</strong></td>
+          <td class="mono">{{ app.course.slug }}</td>
+          <td>{% if app.approved %}<span class="pill ok">approved</span>
+              {% else %}<span class="pill wait">awaiting approval</span>{% endif %}</td>
+          <td class="mono">{{ app.data_url }}</td>
+        </tr>
+      {% endfor %}
+    </table></div>
+    <p class="muted">Secret keys are available from
+      <code>GET /api/apps</code> &mdash; they are never shown on this page.</p>
+  {% else %}
+    <p class="empty">No apps yet.</p>
+  {% endif %}
+
+  <h2>API</h2>
+  <p><a href="/api/docs">Management API docs</a> &middot;
+     <a href="/docs">Data API docs</a></p>
+{% endif %}
+{% endblock %}

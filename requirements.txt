@@ -1,0 +1,10 @@
+# Direct dependencies only; everything else in the venv is transitive.
+Django==5.2.17
+django-ninja==1.6.3
+python-dotenv==1.2.3
+requests==2.34.2
+
+# Canvas publishes no OIDC discovery document and its userinfo returns "id"
+# rather than "sub", so Ldrbrd needs the hcientist fork of django-allauth,
+# which adds per-app "openid_config" overrides and a selectable "uid_field".
+django-allauth[socialaccount] @ git+https://codeberg.org/hcientist/django-allauth.git@overridable_oidc_conf

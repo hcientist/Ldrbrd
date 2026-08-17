@@ -1,0 +1,61 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Ldrbrd{% endblock %}</title>
+<style>
+  :root { color-scheme: light dark; --fg: #16181d; --bg: #fbfbfa; --muted: #6b7280;
+          --line: #e3e3e0; --accent: #b4451f; --code-bg: #f1f1ee; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #e8e8e6; --bg: #16181d; --muted: #9aa0aa;
+            --line: #2c2f36; --accent: #e8935f; --code-bg: #1e2128; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 60rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  header { border-bottom: 1px solid var(--line); }
+  header .inner { max-width: 60rem; margin: 0 auto; padding: 1rem 1.25rem;
+                  display: flex; align-items: baseline; gap: 1rem; }
+  header a { color: inherit; text-decoration: none; }
+  .brand { font-weight: 700; letter-spacing: -0.02em; font-size: 1.15rem; }
+  .spacer { flex: 1; }
+  .muted { color: var(--muted); }
+  h1 { font-size: 1.6rem; letter-spacing: -0.02em; margin: 0 0 .5rem; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .75rem; }
+  a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: .5rem 0 1rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line);
+           vertical-align: top; font-size: .93rem; }
+  th { font-weight: 600; color: var(--muted); font-size: .78rem;
+       text-transform: uppercase; letter-spacing: .06em; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .87em; }
+  code { background: var(--code-bg); padding: .1rem .3rem; border-radius: 3px; }
+  .btn { display: inline-block; background: var(--accent); color: #fff; border: 0;
+         padding: .55rem 1rem; border-radius: 6px; font: inherit; font-weight: 600;
+         cursor: pointer; text-decoration: none; }
+  .pill { font-size: .75rem; padding: .1rem .5rem; border-radius: 999px;
+          border: 1px solid var(--line); color: var(--muted); }
+  .ok { color: #1a7f37; border-color: #1a7f3733; }
+  .wait { color: #9a6700; border-color: #9a670033; }
+  .empty { color: var(--muted); font-style: italic; }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <div class="inner">
+    <a class="brand" href="/">Ldrbrd</a>
+    <span class="spacer"></span>
+    {% if user.is_authenticated %}
+      <span class="muted mono">{{ user.username }}</span>
+      <a href="{% url 'account_logout' %}">sign out</a>
+    {% endif %}
+  </div>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
