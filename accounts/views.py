@@ -27,7 +27,7 @@ def canvas_openid_configuration(request):
         "issuer": canvas,
         "authorization_endpoint": f"{canvas}/login/oauth2/auth",
         "token_endpoint": f"{canvas}/login/oauth2/token",
-        "userinfo_endpoint": f"{canvas}/api/v1/users/self",
+        "userinfo_endpoint": f"{canvas}/api/v1/users/self/profile",
         "jwks_uri": f"{canvas}/login/oauth2/jwks",
         "end_session_endpoint": f"{canvas}/login/oauth2/logout",
         "response_types_supported": ["code"],

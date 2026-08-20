@@ -12,9 +12,13 @@ present, so allauth's stock field extraction comes up empty.  The adapters
 below fill in the gaps.
 """
 
+import logging
+
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.utils.text import slugify
+
+logger = logging.getLogger(__name__)
 
 
 def canvas_payload(sociallogin) -> dict:
@@ -45,6 +49,18 @@ class LdrbrdAccountAdapter(DefaultAccountAdapter):
 
 
 class CanvasSocialAccountAdapter(DefaultSocialAccountAdapter):
+    def on_authentication_error(
+        self, request, provider, error=None, exception=None, extra_context=None
+    ):
+        logger.error(
+            "Social auth error: provider=%s error=%s exception=%r",
+            provider,
+            error,
+            exception,
+        )
+        if hasattr(exception, "response") and exception.response is not None:
+            logger.error("Response body: %s", exception.response.text)
+
     def is_open_for_signup(self, request, sociallogin) -> bool:
         """Anyone who can authenticate with Canvas may register with Ldrbrd."""
         return True
