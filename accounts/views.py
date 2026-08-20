@@ -144,7 +144,7 @@ def course_create(request):
             return render(request, "course_form.html", {"form_action": "create"})
         course = Course(owner=request.user, name=name, description=description, is_open=is_open)
         course.save()
-        messages.success(request, f"Created course "{course.name}".")
+        messages.success(request, f'Created course "{course.name}".')
         return redirect("course-detail", course_id=course.id)
     return render(request, "course_form.html", {"form_action": "create"})
 
@@ -195,10 +195,10 @@ def app_set_approval(request, app_id):
     action = request.POST.get("action")
     if action == "approve":
         app.approve(request.user)
-        messages.success(request, f"Approved "{app.name}".")
+        messages.success(request, f'Approved "{app.name}".')
     elif action == "unapprove":
         app.unapprove()
-        messages.success(request, f"Revoked approval for "{app.name}".")
+        messages.success(request, f'Revoked approval for "{app.name}".')
     return redirect("course-detail", course_id=app.course_id)
 
 
