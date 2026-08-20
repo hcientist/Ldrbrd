@@ -41,6 +41,16 @@
   .wait { color: #9a6700; border-color: #9a670033; }
   .empty { color: var(--muted); font-style: italic; }
   .wrap { overflow-x: auto; }
+  .field { margin-bottom: 1rem; }
+  .field label { display: block; font-weight: 600; margin-bottom: .25rem; font-size: .93rem; }
+  .field input[type="text"], .field textarea { width: 100%; max-width: 30rem; padding: .45rem .6rem;
+    font: inherit; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--bg); color: var(--fg); }
+  .field input[type="checkbox"] { margin-right: .4rem; }
+  .btn-sm { font: inherit; font-size: .8rem; font-weight: 600; padding: .25rem .6rem;
+    border-radius: 4px; border: 1px solid var(--line); background: var(--code-bg);
+    color: var(--fg); cursor: pointer; }
+  .btn-sm.danger { color: #b91c1c; }
 </style>
 </head>
 <body>

@@ -20,13 +20,17 @@
       <tr><th>Course</th><th>Join link (share with students)</th><th>Apps</th></tr>
       {% for course in taught_courses %}
         <tr>
-          <td><strong>{{ course.name }}</strong><br>
+          <td><a href="{% url 'course-detail' course.id %}"><strong>{{ course.name }}</strong></a><br>
               <span class="muted mono">{{ course.data_url }}</span></td>
           <td class="mono">{{ course.join_url }}</td>
           <td>{{ course.apps.count }}</td>
         </tr>
       {% endfor %}
     </table></div>
+  {% endif %}
+
+  {% if user.is_staff %}
+    <p><a class="btn" href="{% url 'course-create' %}">New course</a></p>
   {% endif %}
 
   {% if enrolled_courses %}

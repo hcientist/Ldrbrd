@@ -1,15 +1,17 @@
 """Canvas OIDC discovery shim plus a couple of thin HTML pages."""
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import connection
-from django.http import JsonResponse
+from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.cache import cache_control, never_cache
+from django.views.decorators.http import require_POST
 
 from courses import leaderboard as lb
-from courses.models import Course, Enrollment
+from courses.models import App, Course, Enrollment
 
 
 @cache_control(max_age=300, public=True)
@@ -115,6 +117,89 @@ def top(request):
             ],
         },
     )
+
+
+# --------------------------------------------------------------------------
+# Course management (staff UI)
+# --------------------------------------------------------------------------
+
+
+def _get_own_course(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    if not course.is_administered_by(request.user):
+        raise HttpResponseForbidden("You don't have access to this course.")
+    return course
+
+
+@login_required
+def course_create(request):
+    if not request.user.is_staff:
+        return HttpResponseForbidden("Only staff users can create courses.")
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        description = request.POST.get("description", "").strip()
+        is_open = request.POST.get("is_open") == "on"
+        if not name:
+            messages.error(request, "Course name is required.")
+            return render(request, "course_form.html", {"form_action": "create"})
+        course = Course(owner=request.user, name=name, description=description, is_open=is_open)
+        course.save()
+        messages.success(request, f"Created course "{course.name}".")
+        return redirect("course-detail", course_id=course.id)
+    return render(request, "course_form.html", {"form_action": "create"})
+
+
+@login_required
+def course_detail(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    if not course.is_administered_by(request.user):
+        return HttpResponseForbidden("You don't have access to this course.")
+    apps = course.apps.select_related("owner").order_by("-created_at")
+    enrollments = course.enrollments.select_related("user").order_by("-joined_at")
+    return render(request, "course_detail.html", {
+        "course": course,
+        "apps": apps,
+        "enrollments": enrollments,
+    })
+
+
+@login_required
+def course_edit(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    if not course.is_administered_by(request.user):
+        return HttpResponseForbidden("You don't have access to this course.")
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        if not name:
+            messages.error(request, "Course name is required.")
+            return render(request, "course_form.html", {
+                "form_action": "edit", "course": course,
+            })
+        course.name = name
+        course.description = request.POST.get("description", "").strip()
+        course.is_open = request.POST.get("is_open") == "on"
+        course.save()
+        messages.success(request, "Course updated.")
+        return redirect("course-detail", course_id=course.id)
+    return render(request, "course_form.html", {
+        "form_action": "edit", "course": course,
+    })
+
+
+@login_required
+@require_POST
+def app_set_approval(request, app_id):
+    app = get_object_or_404(App.objects.select_related("course"), pk=app_id)
+    if not app.course.is_administered_by(request.user):
+        return HttpResponseForbidden("Only the course instructor can do that.")
+    action = request.POST.get("action")
+    if action == "approve":
+        app.approve(request.user)
+        messages.success(request, f"Approved "{app.name}".")
+    elif action == "unapprove":
+        app.unapprove()
+        messages.success(request, f"Revoked approval for "{app.name}".")
+    return redirect("course-detail", course_id=app.course_id)
 
 
 @login_required

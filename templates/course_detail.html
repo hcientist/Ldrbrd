@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}{{ course.name }} &middot; Ldrbrd{% endblock %}
+
+{% block content %}
+{% if messages %}
+  {% for msg in messages %}
+    <p class="pill {% if msg.tags == 'success' %}ok{% else %}wait{% endif %}"
+       style="display:inline-block; margin-bottom:.5rem;">{{ msg }}</p>
+  {% endfor %}
+{% endif %}
+
+<h1>{{ course.name }}</h1>
+<p class="muted">
+  {{ course.owner.get_full_name|default:course.owner.username }}
+  &middot;
+  {% if course.is_open %}<span class="pill ok">open</span>
+  {% else %}<span class="pill wait">closed</span>{% endif %}
+  &middot;
+  <a href="{% url 'course-edit' course.id %}">edit</a>
+</p>
+
+{% if course.description %}<p>{{ course.description }}</p>{% endif %}
+
+<h2>Links</h2>
+<table>
+  <tr><th>Join link</th><td class="mono">{{ course.join_url }}</td></tr>
+  <tr><th>Data URL</th><td class="mono">{{ course.data_url }}</td></tr>
+</table>
+
+<h2>Apps ({{ apps|length }})</h2>
+{% if apps %}
+  <div class="wrap"><table>
+    <tr><th>App</th><th>Student</th><th>Status</th><th>Endpoint</th><th></th></tr>
+    {% for app in apps %}
+      <tr>
+        <td><strong>{{ app.name }}</strong><br><span class="muted mono">{{ app.slug }}</span></td>
+        <td class="mono">{{ app.owner.username }}</td>
+        <td>{% if app.approved %}<span class="pill ok">approved</span>
+            {% else %}<span class="pill wait">pending</span>{% endif %}</td>
+        <td class="mono">{{ app.data_url }}</td>
+        <td>
+          <form method="post" action="{% url 'app-set-approval' app.id %}" style="display:inline">
+            {% csrf_token %}
+            {% if app.approved %}
+              <input type="hidden" name="action" value="unapprove">
+              <button class="btn-sm danger" type="submit">revoke</button>
+            {% else %}
+              <input type="hidden" name="action" value="approve">
+              <button class="btn-sm" type="submit">approve</button>
+            {% endif %}
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </table></div>
+{% else %}
+  <p class="empty">No apps registered yet. Share the join link with students to get started.</p>
+{% endif %}
+
+<h2>Students ({{ enrollments|length }})</h2>
+{% if enrollments %}
+  <div class="wrap"><table>
+    <tr><th>Username</th><th>Name</th><th>Joined</th></tr>
+    {% for e in enrollments %}
+      <tr>
+        <td class="mono">{{ e.user.username }}</td>
+        <td>{{ e.user.get_full_name }}</td>
+        <td class="muted">{{ e.joined_at|date:"M j, Y" }}</td>
+      </tr>
+    {% endfor %}
+  </table></div>
+{% else %}
+  <p class="empty">No students enrolled yet.</p>
+{% endif %}
+
+<p><a href="/">&larr; dashboard</a></p>
+{% endblock %}

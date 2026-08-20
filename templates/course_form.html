@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}{% if form_action == "edit" %}Edit {{ course.name }}{% else %}New course{% endif %} &middot; Ldrbrd{% endblock %}
+
+{% block content %}
+{% if messages %}
+  {% for msg in messages %}
+    <p class="pill wait" style="display:inline-block; margin-bottom:.5rem;">{{ msg }}</p>
+  {% endfor %}
+{% endif %}
+
+<h1>{% if form_action == "edit" %}Edit course{% else %}New course{% endif %}</h1>
+
+<form method="post">
+  {% csrf_token %}
+  <div class="field">
+    <label for="id_name">Name</label>
+    <input type="text" name="name" id="id_name" required maxlength="200"
+           value="{{ course.name|default:'' }}">
+  </div>
+  <div class="field">
+    <label for="id_description">Description <span class="muted">(optional)</span></label>
+    <textarea name="description" id="id_description" rows="3">{{ course.description|default:'' }}</textarea>
+  </div>
+  <div class="field">
+    <label>
+      <input type="checkbox" name="is_open"
+             {% if form_action == "create" or course.is_open %}checked{% endif %}>
+      Open for enrollment
+    </label>
+  </div>
+  <button class="btn" type="submit">
+    {% if form_action == "edit" %}Save changes{% else %}Create course{% endif %}
+  </button>
+  {% if form_action == "edit" %}
+    <a href="{% url 'course-detail' course.id %}" style="margin-left:1rem;">cancel</a>
+  {% else %}
+    <a href="/" style="margin-left:1rem;">cancel</a>
+  {% endif %}
+</form>
+{% endblock %}
