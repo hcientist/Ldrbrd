@@ -4,7 +4,11 @@ Two django-ninja APIs are mounted:
 
   * ``/api/``  -- the session-authenticated management API.  CSRF is enforced
                   because ninja's ``django_auth`` is a cookie-based scheme and
-                  checks the token itself.
+                  checks the token itself.  The auth is declared on the
+                  NinjaAPI and not only on the router: ninja decides whether to
+                  give the Swagger page a CSRF request interceptor by looking
+                  at ``api.auth``, so router-only auth leaves "Try it out"
+                  failing every unsafe request with 403 CSRF check failed.
   * ``/``      -- the public data plane, /<instructor>/<course>/<appname>.
                   Authenticated by querystring secret key, so no CSRF applies.
 
@@ -15,6 +19,7 @@ it must be included *last*; everything above it wins the resolution race.
 from django.contrib import admin
 from django.urls import include, path
 from ninja import NinjaAPI
+from ninja.security import django_auth
 
 from accounts import views as account_views
 from courses import data_api
@@ -24,6 +29,7 @@ api = NinjaAPI(
     title="Ldrbrd API",
     version="1.0.0",
     description="Course, app and approval management. Sign in with Canvas first.",
+    auth=django_auth,
     urls_namespace="ldrbrd-api",
 )
 api.add_router("", courses_router)

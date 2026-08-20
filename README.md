@@ -203,6 +203,13 @@ are cumulative totals, not a time series — there is no per-day history to char
 Session-authenticated — sign in through Canvas first. Because ninja's
 `django_auth` is cookie-based, unsafe methods need an `X-CSRFToken` header.
 
+The Swagger page at `/api/docs` handles that for you: ninja installs a request
+interceptor that attaches the token, so **Try it out** works while signed in.
+That interceptor only appears when the *`NinjaAPI`* declares `auth=` — putting
+the auth solely on the router leaves the docs page firing tokenless requests
+and every POST comes back `403 CSRF check Failed`. Scripting the API yourself
+means reading the `csrftoken` cookie and sending it back as `X-CSRFToken`.
+
 | method   | path                                | who                      |
 | -------- | ----------------------------------- | ------------------------ |
 | `GET`    | `/api/top`                          | **public** (no auth)     |

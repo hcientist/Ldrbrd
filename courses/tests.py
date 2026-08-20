@@ -3,7 +3,7 @@
 import json
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from courses.models import App, AppData, AppUsage, Course, Enrollment, record_usage
@@ -92,9 +92,12 @@ class CanvasOidcTests(LdrbrdTestCase):
             config["token_endpoint"],
             "https://school.instructure.com/login/oauth2/token",
         )
+        # /users/self/profile, not /users/self: the profile endpoint is the
+        # one that returns primary_email and login_id, which the adapter needs
+        # to build a username and email.
         self.assertEqual(
             config["userinfo_endpoint"],
-            "https://school.instructure.com/api/v1/users/self",
+            "https://school.instructure.com/api/v1/users/self/profile",
         )
         # Canvas wants credentials in the body, not a Basic header.
         self.assertEqual(
@@ -704,3 +707,74 @@ class LeaderboardBarTests(LdrbrdTestCase):
         by_name, _ = self.bars("writes")
         self.assertEqual(by_name["Reader"]["bar_value"], 0)
         self.assertEqual(by_name["Reader"]["bar_total"], 0)
+
+
+class CsrfTests(LdrbrdTestCase):
+    """The Swagger "Try it out" path, which a normal test client cannot see.
+
+    Django's test client sets enforce_csrf_checks=False, so every other test in
+    this file sails through the CSRF middleware regardless. These use a client
+    that behaves like a browser instead -- that gap is what let /api/docs ship
+    returning 403 on every unsafe request.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.enrol(self.student)
+        self.browser = Client(enforce_csrf_checks=True)
+        self.browser.force_login(self.student)
+
+    def test_docs_page_hands_swagger_a_csrf_token(self):
+        """ninja only emits the interceptor when the *API* declares auth."""
+        response = self.browser.get("/api/docs")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("X-CSRFToken", response.content.decode())
+        self.assertIn("csrftoken", self.browser.cookies)
+
+    def test_api_declares_auth_so_ninja_knows_csrf_is_needed(self):
+        from ninja.openapi.docs import _csrf_needed
+
+        from ldrbrd.urls import api
+
+        self.assertTrue(
+            _csrf_needed(api),
+            "NinjaAPI must declare auth itself; router-only auth leaves the "
+            "docs page without a CSRF interceptor.",
+        )
+
+    def test_student_can_create_an_app_from_the_docs_page(self):
+        self.browser.get("/api/docs")          # sets the cookie
+        token = self.browser.cookies["csrftoken"].value
+        response = self.browser.post(
+            f"/api/courses/{self.course.pk}/apps",
+            data=json.dumps({"name": "My Game"}),
+            content_type="application/json",
+            headers={"x-csrftoken": token},
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["name"], "My Game")
+
+    def test_csrf_is_still_enforced_without_a_token(self):
+        """The fix must hand out tokens, not switch the protection off."""
+        response = self.browser.post(
+            f"/api/courses/{self.course.pk}/apps",
+            data=json.dumps({"name": "Sneaky"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(App.objects.filter(name="Sneaky").exists())
+
+    def test_data_plane_writes_never_need_a_csrf_token(self):
+        """Students' apps post from scripts; a CSRF token would be absurd."""
+        app = self.make_app(approved=True)
+        response = Client(enforce_csrf_checks=True).put(
+            f"/prof/cs-101/score-pusher?secret_key={app.secret_key}",
+            data=json.dumps({"score": 1}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_public_reads_are_unaffected_by_api_level_auth(self):
+        anon = Client(enforce_csrf_checks=True)
+        self.assertEqual(anon.get("/api/top").status_code, 200)
+        self.assertEqual(anon.get("/api/courses").status_code, 401)
